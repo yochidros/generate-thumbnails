@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strings"
 
 	"image/draw"
 	_ "image/jpeg"
@@ -39,7 +40,34 @@ func generateFFmpegCommand(inputFilepath string, outputDirPath string, timespan 
 	return cmd
 }
 
-func GenerateThumbnails(input string, outputDirPath string, span int, width float32, sprit int) {
+func splitImages(inputPath string, outputDirPath string, span int, width float32) error {
+	fmt.Println("# Start generate thumbnails")
+	_, err := os.Stat(outputDirPath)
+	if err == nil {
+		err = os.RemoveAll(outputDirPath)
+		if err != nil {
+			return err
+		}
+	}
+	err = os.MkdirAll(outputDirPath+"/thumbnails", 0777)
+	if err != nil {
+		return err
+	}
+
+	videoInfo := GetVideoInfo(inputPath)
+	fmt.Printf("\n# Completed get video information. \nduration: %d\nstart: %f\nframe-rate: %d", videoInfo.Seconds, videoInfo.Start, videoInfo.Tbr)
+
+	fmt.Println("\n\n# Start Generate sprit images using ffmpeg")
+	command := generateFFmpegCommand(inputPath, outputDirPath+"/thumbnails", span, width, &videoInfo)
+	_, err = command.CombinedOutput()
+
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func GenerateThumbnails(input string, outputDirPath string, span int, width float32, sprit int, outputDir string) {
 	fmt.Println("# Start generate thumbnails")
 	_, err := os.Stat(outputDirPath)
 	if err == nil {
@@ -88,11 +116,11 @@ func GenerateThumbnails(input string, outputDirPath string, span int, width floa
 
 	thumbsAcross := math.Min(float64(totalFileCount), float64(sprit))
 	rows := math.Ceil(float64(totalFileCount) / float64(thumbsAcross))
+	w, h := helper.GetImageDimension(fileNames[0])
 
 	fmt.Println("# Completed Generate sprit images")
-	fmt.Printf("total files: %d\nacross: %f\nrows: %f\n", totalFileCount, thumbsAcross, rows)
+	fmt.Printf("total files: %d\nacross: %f\nrows: %f\nwidth: %d\nheight: %d", totalFileCount, thumbsAcross, rows, w, h)
 	fmt.Println("\n\n# Starting Create JPEG Image and VTT file")
-	w, h := helper.GetImageDimension(fileNames[0])
 
 	tmpTotal, index := 0, 0
 
@@ -117,7 +145,9 @@ func GenerateThumbnails(input string, outputDirPath string, span int, width floa
 		tmpTotal++
 	}
 
+	var urls []string
 	vtt := "WEBVTT\n\n"
+	totalSeconds := 0
 	for i, src := range srcImages {
 		row := math.Ceil(rows / float64(len(srcImages)))
 
@@ -125,7 +155,7 @@ func GenerateThumbnails(input string, outputDirPath string, span int, width floa
 			image.Rect(0, 0, int(float64(w)*thumbsAcross), int(float64(h)*row)),
 		)
 
-		for rx, ry, s, f := 0, -1, 0, 0; f < len(src); f++ {
+		for rx, ry, s, f := 0, -1, totalSeconds, 0; f < len(src); f++ {
 			t1 := fmt.Sprintf("%02d:%02d:%02d.000", s/3600, (s / 60 % 60), s%60)
 			s += span
 			t2 := fmt.Sprintf("%02d:%02d:%02d.000", s/3600, (s / 60 % 60), s%60)
@@ -147,9 +177,14 @@ func GenerateThumbnails(input string, outputDirPath string, span int, width floa
 			rx++
 			vtt += "\n\n"
 		}
+		totalSeconds += len(src)
 
 		dstPath := fmt.Sprintf("%s/%d-thumbnails.jpg", outputDirPath, i)
 		helper.CreateJPEGImage(dstPath, dstImage, 100)
+		urls = append(urls, url)
+	}
+	for i, url := range urls {
+		vtt = strings.ReplaceAll(vtt, fmt.Sprintf("thumbnails%d.jpg", i), url)
 	}
 	helper.WriteString(outputDirPath+"/thumbnails.vtt", vtt)
 	fmt.Printf("#Process Completed!!\nOutput: %s", outputDirPath)
