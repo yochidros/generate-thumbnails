@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"sort"
-	"strings"
 
 	"image/draw"
 	_ "image/jpeg"
@@ -145,7 +144,6 @@ func GenerateThumbnails(input string, outputDirPath string, span int, width floa
 		tmpTotal++
 	}
 
-	var urls []string
 	vtt := "WEBVTT\n\n"
 	totalSeconds := 0
 	for i, src := range srcImages {
@@ -181,10 +179,6 @@ func GenerateThumbnails(input string, outputDirPath string, span int, width floa
 
 		dstPath := fmt.Sprintf("%s/%d-thumbnails.jpg", outputDirPath, i)
 		helper.CreateJPEGImage(dstPath, dstImage, 100)
-		urls = append(urls, url)
-	}
-	for i, url := range urls {
-		vtt = strings.ReplaceAll(vtt, fmt.Sprintf("thumbnails%d.jpg", i), url)
 	}
 	helper.WriteString(outputDirPath+"/thumbnails.vtt", vtt)
 	fmt.Printf("#Process Completed!!\nOutput: %s", outputDirPath)
