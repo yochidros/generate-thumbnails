@@ -82,5 +82,5 @@ func runGenerateThumbnails(option *createOptions) {
 	po.thumbWidth = option.width
 	po.sprit = option.sprit
 
-	generator.GenerateThumbnails(po.inputFile, po.outputFilePath, po.timeSpan, po.thumbWidth, po.sprit)
+	generator.GenerateThumbnails(po.inputFile, po.outputFilePath, po.timeSpan, po.thumbWidth, po.sprit, "out/"+option.output)
 }

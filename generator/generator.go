@@ -15,12 +15,12 @@ import (
 	"github.com/yochidros/generate-thumbnails/helper"
 )
 
-func generateFFmpegCommand(inputFilePah string, outputDirPah string, timespan int, width float32, info *VideoInfo) *exec.Cmd {
+func generateFFmpegCommand(inputFilepath string, outputDirPath string, timespan int, width float32, info *VideoInfo) *exec.Cmd {
 	commandSlices := []string{
 		"-ss",
 		fmt.Sprintf("%0.04f", info.Start+0.0001),
 		"-i",
-		fmt.Sprintf("%s", inputFilePah),
+		fmt.Sprintf("%s", inputFilepath),
 		"-y",
 		"-an",
 		"-sn",
@@ -32,24 +32,51 @@ func generateFFmpegCommand(inputFilePah string, outputDirPah string, timespan in
 		"1",
 		"-vf",
 		fmt.Sprintf("scale=%f:-1,select=not(mod(n\\,%d))", width, info.Tbr*timespan),
-		fmt.Sprintf("%s/tthumbnails-%%04d.jpg", outputDirPah),
+		fmt.Sprintf("%s/tthumbnails-%%04d.jpg", outputDirPath),
 	}
 	cmd := exec.Command("ffmpeg", commandSlices...)
 	fmt.Println(cmd.String())
 	return cmd
 }
 
-func GenerateThumbnails(input string, outputDirPah string, span int, width float32, sprit int) {
+func splitImages(inputPath string, outputDirPath string, span int, width float32) error {
 	fmt.Println("# Start generate thumbnails")
-	_, err := os.Stat(outputDirPah)
+	_, err := os.Stat(outputDirPath)
 	if err == nil {
-		err = os.RemoveAll(outputDirPah)
+		err = os.RemoveAll(outputDirPath)
+		if err != nil {
+			return err
+		}
+	}
+	err = os.MkdirAll(outputDirPath+"/thumbnails", 0777)
+	if err != nil {
+		return err
+	}
+
+	videoInfo := GetVideoInfo(inputPath)
+	fmt.Printf("\n# Completed get video information. \nduration: %d\nstart: %f\nframe-rate: %d", videoInfo.Seconds, videoInfo.Start, videoInfo.Tbr)
+
+	fmt.Println("\n\n# Start Generate sprit images using ffmpeg")
+	command := generateFFmpegCommand(inputPath, outputDirPath+"/thumbnails", span, width, &videoInfo)
+	_, err = command.CombinedOutput()
+
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func GenerateThumbnails(input string, outputDirPath string, span int, width float32, sprit int, outputDir string) {
+	fmt.Println("# Start generate thumbnails")
+	_, err := os.Stat(outputDirPath)
+	if err == nil {
+		err = os.RemoveAll(outputDirPath)
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
 	}
-	err = os.MkdirAll(outputDirPah+"/thumbnails", 0777)
+	err = os.MkdirAll(outputDirPath+"/thumbnails", 0777)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -59,7 +86,7 @@ func GenerateThumbnails(input string, outputDirPah string, span int, width float
 	fmt.Printf("\n# Completed get video information. \nduration: %d\nstart: %f\nframe-rate: %d", videoInfo.Seconds, videoInfo.Start, videoInfo.Tbr)
 
 	fmt.Println("\n\n# Start Generate sprit images using ffmpeg")
-	command := generateFFmpegCommand(input, outputDirPah+"/thumbnails", span, width, &videoInfo)
+	command := generateFFmpegCommand(input, outputDirPath+"/thumbnails", span, width, &videoInfo)
 	_, err = command.CombinedOutput()
 
 	if err != nil {
@@ -67,15 +94,18 @@ func GenerateThumbnails(input string, outputDirPah string, span int, width float
 		os.Exit(1)
 	}
 
-	files, err := ioutil.ReadDir(outputDirPah + "/thumbnails")
+	files, err := ioutil.ReadDir(outputDirPath + "/thumbnails")
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
 	var fileNames []string
 	for _, file := range files {
-		fileNames = append(fileNames, outputDirPah+"/thumbnails/"+file.Name())
+		fileNames = append(fileNames, outputDirPath+"/thumbnails/"+file.Name())
 	}
+	// remote all generate sprit images
+	defer os.RemoveAll(outputDirPath + "/thumbnails/")
+
 	totalFileCount := len(fileNames)
 	if totalFileCount == 0 {
 		fmt.Println("ERROR: thumbnail is empty")
@@ -85,53 +115,72 @@ func GenerateThumbnails(input string, outputDirPah string, span int, width float
 
 	thumbsAcross := math.Min(float64(totalFileCount), float64(sprit))
 	rows := math.Ceil(float64(totalFileCount) / float64(thumbsAcross))
-
-	fmt.Println("# Completed Generate sprit images")
-	fmt.Printf("total files: %d\nacross: %f\nrows: %f\n", totalFileCount, thumbsAcross, rows)
-
-	fmt.Println("\n\n# Starting Create JPEG Image and VTT file")
 	w, h := helper.GetImageDimension(fileNames[0])
 
-	var srcImages []image.Image
-	for _, pah := range fileNames {
-		img, err := helper.GetImage(pah)
+	fmt.Println("# Completed Generate sprit images")
+	fmt.Printf("total files: %d\nacross: %f\nrows: %f\nwidth: %d\nheight: %d", totalFileCount, thumbsAcross, rows, w, h)
+	fmt.Println("\n\n# Starting Create JPEG Image and VTT file")
+
+	tmpTotal, index := 0, 0
+
+	var srcImages [][]image.Image
+	var srcImage []image.Image
+	srcImages = append(srcImages, srcImage)
+
+	for _, path := range fileNames {
+		img, err := helper.GetImage(path)
 		if err != nil {
 			fmt.Println(err)
 			continue
 		}
-		srcImages = append(srcImages, img)
-	}
-
-	dstImage := image.NewRGBA(
-		image.Rect(0, 0, int(float64(w)*thumbsAcross), int(float64(h)*rows)),
-	)
-
-	vtt := "WEBVTT\n\n"
-	for rx, ry, s, f := 0, -1, 0, 0; f < totalFileCount; f++ {
-		t1 := fmt.Sprintf("%02d:%02d:%02d.000", s/3600, (s / 60 % 60), s%60)
-		s += span
-		t2 := fmt.Sprintf("%02d:%02d:%02d.000", s/3600, (s / 60 % 60), s%60)
-
-		if f%int(thumbsAcross) == 0 {
-			rx = 0
-			ry++
+		if (tmpTotal%100) == 0 && tmpTotal != 0 {
+			srcImage = nil
+			srcImages = append(srcImages, srcImage)
+			tmpTotal = 0
+			index++
 		}
 
-		draw.Draw(
-			dstImage,
-			image.Rect(rx*w, ry*h, (rx*w)+w, (ry+1)*h),
-			srcImages[f],
-			image.Point{0, 0},
-			draw.Src,
-		)
-		rx++
-
-		vtt += fmt.Sprintf("%s --> %s\nthumbnails.jpg#xywh=%d,%d,%d,%d", t1, t2, rx*w, ry*h, w, h)
-		vtt += "\n\n"
+		srcImages[index] = append(srcImages[index], img)
+		tmpTotal++
 	}
 
-	helper.CreateJPEGImage(outputDirPah+"/thumbnails.jpg", dstImage, 100)
-	helper.WriteString(outputDirPah+"/thumbnails.vtt", vtt)
-	fmt.Printf("#Process Completed!!\nOutput: %s", outputDirPah)
+	vtt := "WEBVTT\n\n"
+	totalSeconds := 0
+	for i, src := range srcImages {
+		row := math.Ceil(rows / float64(len(srcImages)))
+
+		dstImage := image.NewRGBA(
+			image.Rect(0, 0, int(float64(w)*thumbsAcross), int(float64(h)*row)),
+		)
+
+		for rx, ry, s, f := 0, -1, totalSeconds, 0; f < len(src); f++ {
+			t1 := fmt.Sprintf("%02d:%02d:%02d.000", s/3600, (s / 60 % 60), s%60)
+			s += span
+			t2 := fmt.Sprintf("%02d:%02d:%02d.000", s/3600, (s / 60 % 60), s%60)
+
+			if f%int(thumbsAcross) == 0 {
+				rx = 0
+				ry++
+			}
+
+			draw.Draw(
+				dstImage,
+				image.Rect(rx*w, ry*h, (rx*w)+w, (ry+1)*h),
+				src[f],
+				image.Point{0, 0},
+				draw.Src,
+			)
+			vtt += fmt.Sprintf("%s --> %s\nthumbnails%d.jpg#xywh=%d,%d,%d,%d", t1, t2, i, rx*w, ry*h, w, h)
+
+			rx++
+			vtt += "\n\n"
+		}
+		totalSeconds += len(src)
+
+		dstPath := fmt.Sprintf("%s/%d-thumbnails.jpg", outputDirPath, i)
+		helper.CreateJPEGImage(dstPath, dstImage, 100)
+	}
+	helper.WriteString(outputDirPath+"/thumbnails.vtt", vtt)
+	fmt.Printf("#Process Completed!!\nOutput: %s", outputDirPath)
 	os.Exit(0)
 }
