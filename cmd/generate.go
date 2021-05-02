@@ -15,6 +15,7 @@ type createOptions struct {
 	span   int
 	width  float32
 	sprit  int
+	debug  int
 }
 
 var ffmpegCommand = "ffmpeg -ss %0.04f -i %s -y -an -sn -vsync 0 -q:v 5 -threads 1 -vf scale=%d:-1,select=%d %s/%s/%s-%%04d.jpg"
@@ -35,6 +36,7 @@ func NewCmdGenerate() *cobra.Command {
 	cmd.Flags().IntVarP(&o.span, "time-span", "t", 1, "time span")
 	cmd.Flags().Float32VarP(&o.width, "width", "w", 120.0, "thumbnails width")
 	cmd.Flags().IntVarP(&o.sprit, "sprit", "s", 10, "thumbnails sprit col length")
+	cmd.Flags().IntVarP(&o.debug, "debug", "d", 0, "debug mode")
 	return cmd
 }
 
@@ -82,5 +84,5 @@ func runGenerateThumbnails(option *createOptions) {
 	po.thumbWidth = option.width
 	po.sprit = option.sprit
 
-	generator.GenerateThumbnails(po.inputFile, po.outputFilePath, po.timeSpan, po.thumbWidth, po.sprit, "out/"+option.output)
+	generator.GenerateThumbnails(po.inputFile, po.outputFilePath, po.timeSpan, po.thumbWidth, po.sprit, "out/"+option.output, option.debug)
 }
